@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b0b15">
+<title>回声效果器</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0b0b15;--surface:rgba(22,22,45,0.85);--border:rgba(139,92,246,0.2);
+    --accent:#8b5cf6;--glow:rgba(139,92,246,0.25);--text:#e2e8f0;--dim:#94a3b8;
+    --danger:#ef4444;--success:#10b981;--radius:14px
+  }
+  html,body{height:100%;overflow:hidden}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+    background:var(--bg);color:var(--text);display:flex;flex-direction:column;
+  }
+  body::before{content:'';position:fixed;top:-30%;left:-10%;width:60%;height:80%;background:radial-gradient(ellipse, rgba(139,92,246,.08) 0%,transparent 70%);pointer-events:none}
+  body::after{content:'';position:fixed;bottom:-20%;right:-10%;width:50%;height:60%;background:radial-gradient(ellipse, rgba(59,130,246,.06) 0%,transparent 70%);pointer-events:none}
+
+  .app{flex:1;display:flex;flex-direction:column;max-width:600px;width:100%;margin:0 auto;padding:12px 16px;gap:10px;overflow-y:auto;position:relative;z-index:1}
+
+  .card{background:var(--surface);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px}
+
+  .header{text-align:center;padding:14px 18px}
+  .header h1{font-size:22px;font-weight:700;background:linear-gradient(135deg,#c4b5fd,#8b5cf6,#6366f1);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+  .header .formula{font-family:'SF Mono',Consolas,monospace;font-size:13px;color:var(--dim);letter-spacing:1px}
+  .header .formula em{color:var(--accent);font-style:normal;font-weight:600}
+
+  .upload-zone{border:2px dashed var(--border);border-radius:var(--radius);padding:28px 16px;text-align:center;cursor:pointer;transition:.25s}
+  .upload-zone:hover,.upload-zone.drag-over{border-color:var(--accent);background:rgba(139,92,246,.06)}
+  .upload-zone .icon{font-size:36px;display:block;opacity:.7}
+  .upload-zone .label{font-size:14px;font-weight:600;margin:6px 0 2px}
+  .upload-zone .hint{font-size:11px;color:var(--dim)}
+  .upload-zone input{display:none}
+
+  .file-info{display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(139,92,246,.08);border-radius:10px}
+  .file-info .name{flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .file-info .meta{font-size:11px;color:var(--dim);white-space:nowrap}
+  .file-info .remove{cursor:pointer;opacity:.5;font-size:18px;transition:.25s}
+  .file-info .remove:hover{opacity:1;color:var(--danger)}
+
+  .params{display:flex;flex-direction:column;gap:16px}
+  .param-row{display:flex;flex-direction:column;gap:6px}
+  .param-label{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;font-weight:600}
+  .param-label .value{font-family:'SF Mono',Consolas,monospace;font-size:15px;font-weight:700;color:var(--accent);min-width:60px;text-align:right}
+
+  input[type="range"]{-webkit-appearance:none;appearance:none;width:100%;height:5px;border-radius:3px;background:rgba(255,255,255,.08);outline:none}
+  input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;border-radius:50%;background:var(--accent);box-shadow:0 0 16px var(--glow);cursor:pointer}
+
+  .param-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:2px}
+  .param-tags .tag{font-size:10px;padding:2px 7px;border-radius:8px;background:rgba(255,255,255,.05);color:var(--dim);cursor:pointer;border:1px solid transparent;transition:.2s;white-space:nowrap}
+  .param-tags .tag:hover{border-color:var(--accent);color:var(--accent)}
+  .param-tags .tag.active{background:rgba(139,92,246,.15);border-color:var(--accent);color:var(--accent)}
+
+  .waveform-container{position:relative;width:100%;height:100px;background:rgba(0,0,0,.3);border-radius:10px;overflow:hidden}
+  .waveform-container canvas{width:100%;height:100%;display:block}
+  .waveform-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:12px}
+
+  .actions{display:flex;gap:8px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:10px 16px;font-size:13px;font-weight:600;border-radius:10px;border:1px solid transparent;cursor:pointer;transition:.25s;font-family:inherit;white-space:nowrap;flex:1;min-width:0}
+  .btn:disabled{opacity:.35;cursor:not-allowed}
+  .btn-primary{background:var(--accent);color:#fff;box-shadow:0 4px 20px var(--glow)}
+  .btn-primary:hover:not(:disabled){background:#7c3aed;box-shadow:0 6px 28px rgba(139,92,246,.4);transform:translateY(-1px)}
+  .btn-secondary{background:rgba(255,255,255,.06);color:var(--text);border-color:rgba(255,255,255,.1)}
+  .btn-secondary:hover:not(:disabled){background:rgba(255,255,255,.12)}
+  .btn-sm{padding:7px 12px;font-size:12px}
+
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);padding:10px 20px;border-radius:10px;font-size:12px;font-weight:500;opacity:0;pointer-events:none;transition:opacity .3s;z-index:100;max-width:90vw;text-align:center}
+  .toast.show{opacity:1}
+  .toast.error{border-color:var(--danger);color:var(--danger)}
+  .toast.success{border-color:var(--success);color:var(--success)}
+
+  .install-banner{display:none;background:rgba(139,92,246,.12);border:1px solid var(--accent);border-radius:10px;padding:10px 14px;text-align:center;cursor:pointer;font-size:12px;font-weight:600;color:var(--accent)}
+  .install-banner.show{display:block}
+
+  @media(min-width:600px){.app{padding:20px 24px;gap:14px}.card{padding:20px 24px}.btn{flex:none}}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="card header">
+    <h1>回声效果器</h1>
+    <p class="formula"><em>y</em>[n] = <em>x</em>[n] + <em>α</em> · <em>x</em>[n − D]</p>
+  </div>
+
+  <div class="card upload-zone" id="uploadZone">
+    <span class="icon">&#127925;</span>
+    <div class="label">点击选择音频文件</div>
+    <div class="hint">支持 WAV / MP3 / FLAC / AAC / OGG</div>
+    <input type="file" id="fileInput" accept="audio/*">
+  </div>
+
+  <div class="card install-banner" id="installBanner">&#128241; 添加到主屏幕，像 App 一样使用</div>
+
+  <div class="card file-info" id="fileInfo" style="display:none">
+    <span style="font-size:18px">&#128196;</span>
+    <span class="name" id="fileName"></span>
+    <span class="meta" id="fileMeta"></span>
+    <span class="remove" id="removeFile">&#10005;</span>
+  </div>
+
+  <div class="card params" id="paramPanel" style="display:none">
+    <div class="param-row">
+      <div class="param-label"><span>延迟 D（毫秒）</span><span class="value" id="delayDisplay">300 ms</span></div>
+      <input type="range" id="delaySlider" min="1" max="2000" value="300" step="1">
+    </div>
+    <div class="param-row">
+      <div class="param-label"><span>衰减系数 &#945;</span><span class="value" id="decayDisplay">0.50</span></div>
+      <input type="range" id="decaySlider" min="1" max="95" value="50" step="1">
+      <div class="param-tags">
+        <span class="tag" data-decay="3">极轻 0.03</span>
+        <span class="tag" data-decay="10">轻微 0.10</span>
+        <span class="tag" data-decay="30">适中 0.30</span>
+        <span class="tag" data-decay="60">明显 0.60</span>
+      </div>
+    </div>
+    <div class="waveform-container" id="wfContainer">
+      <canvas id="wfCanvas"></canvas>
+      <div class="waveform-placeholder" id="wfPlaceholder">波形加载中…</div>
+    </div>
+  </div>
+
+  <div class="actions" id="actionBar" style="display:none">
+    <button class="btn btn-secondary btn-sm" id="btnPlayOrig" disabled>&#9654; 原音</button>
+    <button class="btn btn-secondary btn-sm" id="btnPlayEcho" disabled>&#128266; 回声</button>
+    <button class="btn btn-primary btn-sm" id="btnDownload" disabled>&#11015; 下载</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const uploadZone=document.getElementById('uploadZone');
+const fileInput=document.getElementById('fileInput');
+const fileInfo=document.getElementById('fileInfo');
+const fileName=document.getElementById('fileName');
+const fileMeta=document.getElementById('fileMeta');
+const removeFile=document.getElementById('removeFile');
+const paramPanel=document.getElementById('paramPanel');
+const actionBar=document.getElementById('actionBar');
+const delaySlider=document.getElementById('delaySlider');
+const decaySlider=document.getElementById('decaySlider');
+const delayDisplay=document.getElementById('delayDisplay');
+const decayDisplay=document.getElementById('decayDisplay');
+const btnPlayOrig=document.getElementById('btnPlayOrig');
+const btnPlayEcho=document.getElementById('btnPlayEcho');
+const btnDownload=document.getElementById('btnDownload');
+const wfCanvas=document.getElementById('wfCanvas');
+const wfPlaceholder=document.getElementById('wfPlaceholder');
+const installBanner=document.getElementById('installBanner');
+const toastEl=document.getElementById('toast');
+
+let audioBuffer=null;
+let audioCtx=null;
+let currentSource=null;
+let filename='';
+let channels=1;
+let sampleRate=0;
+let duration=0;
+
+function getAC(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx}
+function stopPlayback(){if(currentSource){try{currentSource.stop()}catch(e){}currentSource.disconnect();currentSource=null}}
+
+function showToast(msg,type=''){
+  toastEl.textContent=msg;toastEl.className='toast show '+type;
+  clearTimeout(toastEl._t);toastEl._t=setTimeout(()=>toastEl.className='toast',3000);
+}
+
+// ─── 文件处理 ────────────────────────────────────────
+function handleFile(file){
+  if(!file)return;
+  stopPlayback();
+  const reader=new FileReader();
+  reader.onload=function(){
+    showToast('解码中…');
+    getAC().decodeAudioData(reader.result).then(function(buf){
+      audioBuffer=buf;
+      sampleRate=buf.sampleRate;
+      channels=buf.numberOfChannels;
+      duration=buf.duration;
+      filename=file.name;
+      fileName.textContent=file.name;
+      fileMeta.textContent=sampleRate+'Hz · '+channels+'ch · '+duration.toFixed(1)+'s';
+      fileInfo.style.display='flex';
+      paramPanel.style.display='flex';
+      actionBar.style.display='flex';
+      btnPlayOrig.disabled=false;
+      btnPlayEcho.disabled=false;
+      btnDownload.disabled=false;
+      drawWaveform();
+      showToast('加载成功','success');
+    }).catch(function(e){
+      showToast('解码失败: '+e.message,'error');
+      resetUI();
+    });
+  };
+  reader.onerror=function(){showToast('读取文件失败','error')};
+  reader.readAsArrayBuffer(file);
+}
+
+function resetUI(){
+  stopPlayback();
+  audioBuffer=null;
+  fileInfo.style.display='none';
+  paramPanel.style.display='none';
+  actionBar.style.display='none';
+  btnPlayOrig.disabled=true;btnPlayEcho.disabled=true;btnDownload.disabled=true;
+  wfPlaceholder.style.display='flex';
+  clearCanvas();
+}
+
+// ─── 波形 ────────────────────────────────────────────
+function drawWaveform(){
+  if(!audioBuffer){clearCanvas();return}
+  const buf=audioBuffer;
+  const data=buf.getChannelData(0);
+  const n=data.length;
+  const target=Math.min(n,1200);
+  const step=Math.max(1,Math.floor(n/target));
+  const canvas=wfCanvas;
+  const dpr=window.devicePixelRatio||1;
+  const rect=canvas.parentElement.getBoundingClientRect();
+  canvas.width=rect.width*dpr;canvas.height=rect.height*dpr;
+  canvas.style.width=rect.width+'px';canvas.style.height=rect.height+'px';
+  const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
+  const w=rect.width,h=rect.height,mid=h/2;
+  ctx.clearRect(0,0,w,h);
+  ctx.beginPath();ctx.moveTo(0,mid);
+  for(let i=0;i<target;i++){const idx=i*step;const x=i/(target-1)*w;const y=mid+data[idx]*mid*.9;ctx.lineTo(x,y)}
+  for(let i=target-1;i>=0;i--){const idx=i*step;const x=i/(target-1)*w;const y=mid-data[idx]*mid*.9;ctx.lineTo(x,y)}
+  ctx.closePath();
+  const g=ctx.createLinearGradient(0,0,0,h);g.addColorStop(0,'rgba(139,92,246,.2)');g.addColorStop(.5,'rgba(139,92,246,.45)');g.addColorStop(1,'rgba(139,92,246,.2)');
+  ctx.fillStyle=g;ctx.fill();
+  ctx.strokeStyle='rgba(139,92,246,.35)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,mid);ctx.lineTo(w,mid);ctx.stroke();
+  wfPlaceholder.style.display='none';
+}
+function clearCanvas(){
+  const canvas=wfCanvas;const dpr=window.devicePixelRatio||1;const rect=canvas.parentElement.getBoundingClientRect();
+  canvas.width=rect.width*dpr;canvas.height=rect.height*dpr;canvas.style.width=rect.width+'px';canvas.style.height=rect.height+'px';
+  canvas.getContext('2d').scale(dpr,dpr);canvas.getContext('2d').clearRect(0,0,rect.width,rect.height);
+}
+
+// ─── 回声 DSP ────────────────────────────────────────
+function createEchoNodes(ac,delayMs,decay){
+  const delay=ac.createDelay(2);
+  delay.delayTime.value=delayMs/1000;
+  const gain=ac.createGain();
+  gain.gain.value=decay;
+  delay.connect(gain);
+  return [delay,gain];
+}
+
+function playEcho(delayMs,decay){
+  if(!audioBuffer)return;
+  stopPlayback();
+  const ac=getAC();
+  const src=ac.createBufferSource();src.buffer=audioBuffer;
+  const [delay,gain]=createEchoNodes(ac,delayMs,decay);
+  // y[n] = x[n] + alpha * x[n-D]
+  src.connect(ac.destination);           // dry
+  src.connect(delay);delay.connect(gain);gain.connect(ac.destination); // wet
+  currentSource=src;
+  src.onended=function(){currentSource=null;try{delay.disconnect();gain.disconnect()}catch(e){}};
+  src.start();
+}
+
+function playOriginal(){
+  if(!audioBuffer)return;
+  stopPlayback();
+  const ac=getAC();const src=ac.createBufferSource();src.buffer=audioBuffer;
+  src.connect(ac.destination);currentSource=src;
+  src.onended=function(){currentSource=null};
+  src.start();
+}
+
+// ─── 下载 ────────────────────────────────────────────
+function downloadEcho(delayMs,decay){
+  if(!audioBuffer)return;
+  btnDownload.disabled=true;btnDownload.textContent='处理中…';
+  const length=audioBuffer.length;
+  const sr=audioBuffer.sampleRate;
+  const ch=audioBuffer.numberOfChannels;
+
+  const offline=new OfflineAudioContext(ch,length,sr);
+  const src=offline.createBufferSource();src.buffer=audioBuffer;
+  const [delay,gain]=createEchoNodes(offline,delayMs,decay);
+  src.connect(offline.destination);
+  src.connect(delay);delay.connect(gain);gain.connect(offline.destination);
+  src.start(0);
+
+  offline.startRendering().then(function(rendered){
+    const wav=audioBufferToWav(rendered);
+    const blob=new Blob([wav],{type:'audio/wav'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;
+    a.download=filename.replace(/\.[^.]+$/,'')+'_echo_d'+delayMs+'_a'+Math.round(decay*100)+'.wav';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('下载完成','success');
+  }).catch(function(e){showToast('渲染失败: '+e.message,'error')}).finally(function(){
+    btnDownload.disabled=false;btnDownload.textContent='\u2B07 下载';
+  });
+}
+
+function audioBufferToWav(buffer){
+  const numChannels=buffer.numberOfChannels,sampleRate=buffer.sampleRate;
+  const format=1,bitDepth=16;
+  const bytesPerSample=bitDepth/8,blockAlign=numChannels*bytesPerSample;
+  const dataLength=buffer.length*blockAlign;
+  const headerLength=44;
+  const totalLength=headerLength+dataLength;
+  const arrayBuffer=new ArrayBuffer(totalLength);
+  const view=new DataView(arrayBuffer);
+  function writeString(offset,str){for(let i=0;i<str.length;i++)view.setUint8(offset+i,str.charCodeAt(i))}
+  writeString(0,'RIFF');view.setUint32(4,totalLength-8,true);writeString(8,'WAVE');
+  writeString(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,format,true);
+  view.setUint16(22,numChannels,true);view.setUint32(24,sampleRate,true);
+  view.setUint32(28,sampleRate*blockAlign,true);view.setUint16(32,blockAlign,true);
+  view.setUint16(34,bitDepth,true);writeString(36,'data');view.setUint32(40,dataLength,true);
+  let offset=44;
+  const channels=[];for(let c=0;c<numChannels;c++)channels.push(buffer.getChannelData(c));
+  for(let i=0;i<buffer.length;i++){for(let c=0;c<numChannels;c++){
+    let sample=Math.max(-1,Math.min(1,channels[c][i]));
+    sample=sample<0?sample*0x8000:sample*0x7FFF;
+    view.setInt16(offset,sample,true);offset+=2;
+  }}
+  return arrayBuffer;
+}
+
+// ─── 事件 ────────────────────────────────────────────
+uploadZone.addEventListener('click',()=>fileInput.click());
+fileInput.addEventListener('change',()=>{if(fileInput.files.length)handleFile(fileInput.files[0])});
+uploadZone.addEventListener('dragover',e=>{e.preventDefault();uploadZone.classList.add('drag-over')});
+uploadZone.addEventListener('dragleave',()=>uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop',e=>{
+  e.preventDefault();uploadZone.classList.remove('drag-over');
+  const f=e.dataTransfer.files[0];if(f)handleFile(f);
+});
+removeFile.addEventListener('click',e=>{e.stopPropagation();resetUI()});
+
+delaySlider.addEventListener('input',()=>{delayDisplay.textContent=delaySlider.value+' ms'});
+decaySlider.addEventListener('input',()=>{decayDisplay.textContent=(decaySlider.value/100).toFixed(2)});
+document.querySelectorAll('.param-tags .tag').forEach(t=>{
+  t.addEventListener('click',function(){
+    decaySlider.value=this.dataset.decay;decaySlider.dispatchEvent(new Event('input'));
+    document.querySelectorAll('.param-tags .tag').forEach(x=>x.classList.remove('active'));
+    this.classList.add('active');
+  });
+});
+
+btnPlayOrig.addEventListener('click',playOriginal);
+btnPlayEcho.addEventListener('click',function(){
+  playEcho(parseInt(delaySlider.value),parseInt(decaySlider.value)/100);
+});
+btnDownload.addEventListener('click',function(){
+  downloadEcho(parseInt(delaySlider.value),parseInt(decaySlider.value)/100);
+});
+
+window.addEventListener('resize',function(){
+  clearTimeout(window._wfd);window._wfd=setTimeout(function(){if(audioBuffer)drawWaveform()},200);
+});
+
+// ─── PWA 安装 ────────────────────────────────────────
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt',function(e){
+  e.preventDefault();deferredPrompt=e;installBanner.classList.add('show');
+});
+installBanner.addEventListener('click',function(){
+  if(deferredPrompt){deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){
+    installBanner.classList.remove('show');deferredPrompt=null;
+  })}
+});
+
+// ─── Service Worker ──────────────────────────────────
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(function(){});
+}
+</script>
+</body>
+</html>
