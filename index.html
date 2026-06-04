@@ -79,10 +79,13 @@
   .install-banner{display:none;background:rgba(139,92,246,.12);border:1px solid var(--accent);border-radius:10px;padding:10px 14px;text-align:center;cursor:pointer;font-size:12px;font-weight:600;color:var(--accent)}
   .install-banner.show{display:block}
 
+  #vizCanvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:.85}
+
   @media(min-width:600px){.app{padding:20px 24px;gap:14px}.card{padding:20px 24px}.btn{flex:none}}
 </style>
 </head>
 <body>
+<canvas id="vizCanvas"></canvas>
 
 <div class="app">
   <div class="card header">
@@ -159,14 +162,27 @@ const toastEl=document.getElementById('toast');
 
 let audioBuffer=null;
 let audioCtx=null;
+let analyserNode=null;
 let currentSource=null;
 let filename='';
 let channels=1;
 let sampleRate=0;
 let duration=0;
+let vizActive=false;
+let vizAnimId=null;
+let barHeights=null;
 
-function getAC(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx}
-function stopPlayback(){if(currentSource){try{currentSource.stop()}catch(e){}currentSource.disconnect();currentSource=null}}
+function getAC(){
+  if(!audioCtx){
+    audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    analyserNode=audioCtx.createAnalyser();
+    analyserNode.fftSize=128;
+    analyserNode.smoothingTimeConstant=0.82;
+    analyserNode.connect(audioCtx.destination);
+  }
+  return audioCtx;
+}
+function stopPlayback(){if(currentSource){try{currentSource.stop()}catch(e){}currentSource.disconnect();currentSource=null}vizActive=false}
 
 function showToast(msg,type=''){
   toastEl.textContent=msg;toastEl.className='toast show '+type;
@@ -267,20 +283,24 @@ function playEcho(delayMs,decay){
   const src=ac.createBufferSource();src.buffer=audioBuffer;
   const [d1,g1,d2,g2,d3,g3]=createEchoNodes(ac,delayMs,decay);
   // y[n] = x[n] + α·x[n-D] + α²·x[n-2D] + α³·x[n-3D]
-  src.connect(ac.destination); // dry
-  src.connect(d1);d1.connect(g1);g1.connect(d2);d2.connect(g2);g2.connect(d3);d3.connect(g3);g3.connect(ac.destination); // wet
+  src.connect(analyserNode); // dry → analyser → destination
+  src.connect(d1);d1.connect(g1);g1.connect(d2);d2.connect(g2);g2.connect(d3);d3.connect(g3);g3.connect(analyserNode); // wet
   currentSource=src;
-  src.onended=function(){currentSource=null;try{d1.disconnect();g1.disconnect();d2.disconnect();g2.disconnect();d3.disconnect();g3.disconnect()}catch(e){}};
+  src.onended=function(){currentSource=null;vizActive=false;try{d1.disconnect();g1.disconnect();d2.disconnect();g2.disconnect();d3.disconnect();g3.disconnect()}catch(e){}};
   src.start();
+  vizActive=true;
+  startViz();
 }
 
 function playOriginal(){
   if(!audioBuffer)return;
   stopPlayback();
   const ac=getAC();const src=ac.createBufferSource();src.buffer=audioBuffer;
-  src.connect(ac.destination);currentSource=src;
-  src.onended=function(){currentSource=null};
+  src.connect(analyserNode);currentSource=src;
+  src.onended=function(){currentSource=null;vizActive=false};
   src.start();
+  vizActive=true;
+  startViz();
 }
 
 // ─── 下载 ────────────────────────────────────────────
@@ -335,6 +355,120 @@ function audioBufferToWav(buffer){
     view.setInt16(offset,sample,true);offset+=2;
   }}
   return arrayBuffer;
+}
+
+// ─── 背景可视化 ──────────────────────────────────────
+const vizCanvas=document.getElementById('vizCanvas');
+const vizCtx=vizCanvas.getContext('2d');
+const BAR_COUNT=48;
+const LERP_SPEED=0.13;
+const FADE_SPEED=0.04;
+
+function resizeViz(){
+  const dpr=window.devicePixelRatio||1;
+  vizCanvas.width=window.innerWidth*dpr;
+  vizCanvas.height=window.innerHeight*dpr;
+  vizCtx.scale(dpr,dpr);
+  if(!barHeights)barHeights=new Float32Array(BAR_COUNT);
+}
+resizeViz();
+window.addEventListener('resize',resizeViz);
+
+function startViz(){
+  if(vizAnimId)return;
+  if(!barHeights)barHeights=new Float32Array(BAR_COUNT);
+  vizAnimId=requestAnimationFrame(renderViz);
+}
+
+function renderViz(){
+  const w=window.innerWidth;
+  const h=window.innerHeight;
+  vizCtx.clearRect(0,0,w,h);
+
+  if(!analyserNode){vizAnimId=null;return}
+
+  const freqData=new Uint8Array(analyserNode.frequencyBinCount);
+  analyserNode.getByteFrequencyData(freqData);
+
+  // Map frequency bins to bars (use lower 75% of spectrum for musical feel)
+  const usableBins=Math.floor(freqData.length*0.75);
+  const binsPerBar=Math.max(1,Math.floor(usableBins/BAR_COUNT));
+
+  let anyActive=false;
+
+  for(let i=0;i<BAR_COUNT;i++){
+    // Average a group of frequency bins
+    let sum=0;
+    const startBin=Math.floor(i*usableBins/BAR_COUNT);
+    for(let b=0;b<binsPerBar&&startBin+b<usableBins;b++){
+      sum+=freqData[startBin+b];
+    }
+    const target=(sum/binsPerBar)/255; // normalize to 0-1
+
+    // Smooth interpolation for "breathing" feel
+    if(vizActive){
+      barHeights[i]+=(target-barHeights[i])*LERP_SPEED;
+    }else{
+      barHeights[i]*=(1-FADE_SPEED);
+    }
+
+    if(barHeights[i]>0.005)anyActive=true;
+
+    const barH=barHeights[i]*h*0.35; // max 35% of screen height
+    if(barH<1)continue;
+
+    // Bar positioning - spread across full width with small gaps
+    const gap=2;
+    const barW=(w/BAR_COUNT)-gap;
+    const x=i*(barW+gap)+gap/2;
+    const y=h-barH;
+
+    // Gradient per bar: purple glow from bottom, fading to transparent at top
+    const grad=vizCtx.createLinearGradient(x,h,x,y);
+    const alpha=barHeights[i]*0.22; // keep it subtle, max ~0.22 opacity
+    grad.addColorStop(0,'rgba(139,92,246,'+alpha*0.3+')');
+    grad.addColorStop(0.3,'rgba(139,92,246,'+alpha*0.7+')');
+    grad.addColorStop(0.7,'rgba(99,102,241,'+alpha*0.5+')');
+    grad.addColorStop(1,'rgba(99,102,241,0)');
+
+    vizCtx.fillStyle=grad;
+
+    // Rounded top corners
+    const r=Math.min(barW/2,4);
+    vizCtx.beginPath();
+    vizCtx.moveTo(x,h);
+    vizCtx.lineTo(x,y+r);
+    vizCtx.quadraticCurveTo(x,y,x+r,y);
+    vizCtx.lineTo(x+barW-r,y);
+    vizCtx.quadraticCurveTo(x+barW,y,x+barW,y+r);
+    vizCtx.lineTo(x+barW,h);
+    vizCtx.closePath();
+    vizCtx.fill();
+  }
+
+  // Subtle center glow that pulses with bass
+  if(vizActive||anyActive){
+    if(barHeights){
+      const glowAlpha=barHeights[0]*0.08;
+      if(glowAlpha>0.002){
+        const grd=vizCtx.createRadialGradient(w/2,h*0.85,0,w/2,h*0.85,w*0.5);
+        grd.addColorStop(0,'rgba(139,92,246,'+glowAlpha+')');
+        grd.addColorStop(0.5,'rgba(99,102,241,'+glowAlpha*0.3+')');
+        grd.addColorStop(1,'rgba(99,102,241,0)');
+        vizCtx.fillStyle=grd;
+        vizCtx.fillRect(0,0,w,h);
+      }
+    }
+  }
+
+  // Continue animation if active or bars still visible
+  if(vizActive||anyActive){
+    vizAnimId=requestAnimationFrame(renderViz);
+  }else{
+    // Fully faded out - stop the loop
+    vizCtx.clearRect(0,0,w,h);
+    vizAnimId=null;
+  }
 }
 
 // ─── 事件 ────────────────────────────────────────────
