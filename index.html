@@ -293,7 +293,7 @@ function playEcho(delayMs,decay){
   src.connect(analyserNode); // dry → analyser → destination
   src.connect(d1);d1.connect(g1);g1.connect(d2);d2.connect(g2);g2.connect(d3);d3.connect(g3);g3.connect(analyserNode); // wet
   currentSource=src;
-  src.onended=function(){currentSource=null;vizActive=false;try{d1.disconnect();g1.disconnect();d2.disconnect();g2.disconnect();d3.disconnect();g3.disconnect()}catch(e){}};
+  src.onended=function(){if(currentSource===src)currentSource=null;vizActive=false;try{d1.disconnect();g1.disconnect();d2.disconnect();g2.disconnect();d3.disconnect();g3.disconnect()}catch(e){}};
   src.start();
   vizActive=true;
   startViz();
@@ -304,7 +304,7 @@ function playOriginal(){
   stopPlayback();
   const ac=getAC();const src=ac.createBufferSource();src.buffer=audioBuffer;
   src.connect(analyserNode);currentSource=src;
-  src.onended=function(){currentSource=null;vizActive=false};
+  src.onended=function(){if(currentSource===src)currentSource=null;vizActive=false};
   src.start();
   vizActive=true;
   startViz();
