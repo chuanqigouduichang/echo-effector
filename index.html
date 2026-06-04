@@ -87,7 +87,7 @@
 <div class="app">
   <div class="card header">
     <h1>回声效果器</h1>
-    <p class="formula"><em>y</em>[n] = <em>x</em>[n] + <em>α</em> · <em>x</em>[n − D]</p>
+    <p class="formula"><em>y</em>[n] = <em>x</em>[n] + <em>α</em>&middot;<em>x</em>[n−D] + <em>α</em><sup>2</sup>&middot;<em>x</em>[n−2D] + <em>α</em><sup>3</sup>&middot;<em>x</em>[n−3D]</p>
   </div>
 
   <div class="card upload-zone" id="uploadZone">
@@ -108,8 +108,8 @@
 
   <div class="card params" id="paramPanel" style="display:none">
     <div class="param-row">
-      <div class="param-label"><span>延迟 D（毫秒）</span><span class="value" id="delayDisplay">300 ms</span></div>
-      <input type="range" id="delaySlider" min="1" max="2000" value="300" step="1">
+      <div class="param-label"><span>延迟 D（毫秒）</span><span class="value" id="delayDisplay">120 ms</span></div>
+      <input type="range" id="delaySlider" min="1" max="500" value="120" step="1">
     </div>
     <div class="param-row">
       <div class="param-label"><span>衰减系数 &#945;</span><span class="value" id="decayDisplay">0.50</span></div>
@@ -247,14 +247,17 @@ function clearCanvas(){
   canvas.getContext('2d').scale(dpr,dpr);canvas.getContext('2d').clearRect(0,0,rect.width,rect.height);
 }
 
-// ─── 回声 DSP ────────────────────────────────────────
+// ─── 三次回声 DSP ────────────────────────────────────
 function createEchoNodes(ac,delayMs,decay){
-  const delay=ac.createDelay(2);
-  delay.delayTime.value=delayMs/1000;
-  const gain=ac.createGain();
-  gain.gain.value=decay;
-  delay.connect(gain);
-  return [delay,gain];
+  const D=delayMs/1000;
+  const d1=ac.createDelay(5);d1.delayTime.value=D;
+  const g1=ac.createGain();g1.gain.value=decay;
+  const d2=ac.createDelay(5);d2.delayTime.value=D;
+  const g2=ac.createGain();g2.gain.value=decay;
+  const d3=ac.createDelay(5);d3.delayTime.value=D;
+  const g3=ac.createGain();g3.gain.value=decay;
+  d1.connect(g1);g1.connect(d2);d2.connect(g2);g2.connect(d3);d3.connect(g3);
+  return [d1,g1,d2,g2,d3,g3];
 }
 
 function playEcho(delayMs,decay){
@@ -262,12 +265,12 @@ function playEcho(delayMs,decay){
   stopPlayback();
   const ac=getAC();
   const src=ac.createBufferSource();src.buffer=audioBuffer;
-  const [delay,gain]=createEchoNodes(ac,delayMs,decay);
-  // y[n] = x[n] + alpha * x[n-D]
-  src.connect(ac.destination);           // dry
-  src.connect(delay);delay.connect(gain);gain.connect(ac.destination); // wet
+  const [d1,g1,d2,g2,d3,g3]=createEchoNodes(ac,delayMs,decay);
+  // y[n] = x[n] + α·x[n-D] + α²·x[n-2D] + α³·x[n-3D]
+  src.connect(ac.destination); // dry
+  src.connect(d1);d1.connect(g1);g1.connect(d2);d2.connect(g2);g2.connect(d3);d3.connect(g3);g3.connect(ac.destination); // wet
   currentSource=src;
-  src.onended=function(){currentSource=null;try{delay.disconnect();gain.disconnect()}catch(e){}};
+  src.onended=function(){currentSource=null;try{d1.disconnect();g1.disconnect();d2.disconnect();g2.disconnect();d3.disconnect();g3.disconnect()}catch(e){}};
   src.start();
 }
 
@@ -290,9 +293,9 @@ function downloadEcho(delayMs,decay){
 
   const offline=new OfflineAudioContext(ch,length,sr);
   const src=offline.createBufferSource();src.buffer=audioBuffer;
-  const [delay,gain]=createEchoNodes(offline,delayMs,decay);
+  const [d1,g1,d2,g2,d3,g3]=createEchoNodes(offline,delayMs,decay);
   src.connect(offline.destination);
-  src.connect(delay);delay.connect(gain);gain.connect(offline.destination);
+  src.connect(d1);d1.connect(g1);g1.connect(d2);d2.connect(g2);g2.connect(d3);d3.connect(g3);g3.connect(offline.destination);
   src.start(0);
 
   offline.startRendering().then(function(rendered){
