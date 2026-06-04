@@ -164,6 +164,7 @@ let audioBuffer=null;
 let audioCtx=null;
 let analyserNode=null;
 let currentSource=null;
+let echoNodes=[];
 let filename='';
 let channels=1;
 let sampleRate=0;
@@ -182,7 +183,12 @@ function getAC(){
   }
   return audioCtx;
 }
-function stopPlayback(){if(currentSource){try{currentSource.stop()}catch(e){}currentSource.disconnect();currentSource=null}vizActive=false}
+function stopPlayback(){
+  if(currentSource){try{currentSource.stop()}catch(e){}currentSource.disconnect();currentSource=null}
+  for(const n of echoNodes){try{n.disconnect()}catch(e){}}
+  echoNodes=[];
+  vizActive=false;
+}
 
 function showToast(msg,type=''){
   toastEl.textContent=msg;toastEl.className='toast show '+type;
@@ -282,6 +288,7 @@ function playEcho(delayMs,decay){
   const ac=getAC();
   const src=ac.createBufferSource();src.buffer=audioBuffer;
   const [d1,g1,d2,g2,d3,g3]=createEchoNodes(ac,delayMs,decay);
+  echoNodes=[d1,g1,d2,g2,d3,g3];
   // y[n] = x[n] + α·x[n-D] + α²·x[n-2D] + α³·x[n-3D]
   src.connect(analyserNode); // dry → analyser → destination
   src.connect(d1);d1.connect(g1);g1.connect(d2);d2.connect(g2);g2.connect(d3);d3.connect(g3);g3.connect(analyserNode); // wet
