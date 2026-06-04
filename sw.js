@@ -1,4 +1,4 @@
-const CACHE = 'echo-v2';
+const CACHE = 'echo-v3';
 const ASSETS = ['./', 'index.html', 'manifest.json'];
 
 self.addEventListener('install', e => {
